@@ -1,0 +1,42 @@
+
+
+neigh_num=5
+global_knn=[]
+for k in range(0,total_sample):
+  dummy=0
+  knn_complete=[]
+  for l in range(0, node_num):
+    knn_inter_list=[]
+    p=pairwise_distances(X[k].reshape(1, -1), nodes[l], metric='euclidean')
+    if(k==0 and l==0):
+      print(p.shape)
+    for m in range (0,len(p[0])):
+      list1=[]
+      list1.append(p[0][m])
+      list1.append(dummy+m)
+      knn_inter_list.append(list1)
+    knn_inter_list.sort()
+    local_knn=[]
+    for q in range(0,neigh_num):
+      local_knn.append(knn_inter_list[q])
+    knn_complete.extend(local_knn)
+    
+    dummy=dummy+div
+  knn_complete.sort()
+  knn_complete=knn_complete[:neigh_num]
+  global_knn.append(knn_complete)
+
+distance=[]
+index=[]
+for b in range(0, total_sample):
+  dis=[]
+  ind=[]
+  for v in range(0, neigh_num):
+    dis.append(global_knn[b][v][0])
+    ind.append(global_knn[b][v][1])
+  distance.append(dis)
+  index.append(ind)
+from numpy import array
+
+for qw in range(0,20):
+  print(array(index[qw]))
