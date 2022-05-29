@@ -42,8 +42,8 @@ knn_rec:=RECORD
     INTEGER4 SI ;
     INTEGER4 knn;
     REAL4 dis;
-    REAL4 reach:=0;
-    REAL4 LRD:=0;
+    REAL4 reach;
+    REAL4 LRD;
 END;
 
 STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle, INTEGER K) :=
@@ -84,15 +84,32 @@ OUTPUT(handle, NAMED('handle'));
 MyDS2:=DISTRIBUTE(MyDS);
 OUTPUT(MyDS2, NAMED('MyDS2'));
 INTEGER K:=3;
-
-
 MyDS3 := knn(MyDS2, handle, K);
-knn_rec reachDis(MyDS3 L, MyDS3 R) := TRANSFORM
-    SELF.reach := MyDS3[(INTEGER4)R.knn].dis;
-    SELF := R;
-END;
 
-MyDS4 := ITERATE(MyDS3, reachDis(LEFT, RIGHT));
+STREAMED DATASET(knn_rec) doFactorials(STREAMED DATASET(knn_rec) recs) := EMBED(Python: activity)
+    #import numpy
+    mainList=[]
+    for recTuple in recs:
+        mainList.append(list(recTuple))
+    
+    for x in mainList:
+        l=[]
+        num = x[1]
+        l.append(x[0])
+        l.append(x[1])
+        l.append(x[2])
+        l.append(float(mainList[num][2]))
+        l.append(float(x[4]))
+        yield (tuple(l))
+ENDEMBED;
+
+// knn_rec reachDis(MyDS3 L, MyDS3 R) := TRANSFORM
+//     SELF.reach := MyDS3[(INTEGER4)R.knn].dis;
+//     SELF := R;
+// END;
+//MyDS4 := ITERATE(MyDS3, reachDis(LEFT,RIGHT));
 
 OUTPUT(MyDS3, NAMED('Dataset_Complete'));
-OUTPUT(MyDS4, NAMED('Dataset_Complete2'));
+
+MyDS4 := doFactorials(MyDS3);
+OUTPUT(MyDS4[1..100], NAMED('Dataset_Complete2'));
