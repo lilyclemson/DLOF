@@ -66,7 +66,7 @@ STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle,
 ENDEMBED;
 
 dummy_rec addSI(anomaly L, INTEGER C) := TRANSFORM
-    SELF.SI:= C;
+    SELF.SI:= C-1;
     SELF := L;
 END;
 
@@ -83,7 +83,7 @@ OUTPUT(handle, NAMED('handle'));
 
 MyDS2:=DISTRIBUTE(MyDS);
 OUTPUT(MyDS2, NAMED('MyDS2'));
-INTEGER K:=1000;
+INTEGER K:=5;
 MyDS3 := knn(MyDS2, handle, K);
 
 OUTPUT(MyDS3, NAMED('Dataset_Complete'));
