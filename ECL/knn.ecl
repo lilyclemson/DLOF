@@ -49,10 +49,12 @@ ENDEMBED;
 // Otherwise, we can't guarantee that fmInit will be called first.
 knn_rec:=RECORD
     INTEGER4 SI ;
+    INTEGER4 KNNSI;
     INTEGER4 knn;
     REAL4 dis;
-    REAL4 reach:=0;
-    REAL4 LRD:=0;
+    REAL4 Kdis:=0;
+    REAL KNNdis:=0;
+   
 END;
 
 STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle, INTEGER K) :=
@@ -65,14 +67,14 @@ STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle,
         dis, ind=OBJECT.tree.query([list(searchItem)], K)
         
         for x in range(0, len(dis[0])):
-            result=(int(recTuple[0]),int(ind[0][x]),float(dis[0][x]),float(0),float(0))
+            result=(int(recTuple[0]),int(x),int(ind[0][x]),float(dis[0][x]),float(dis[0][K-1]), float(0))
             yield (result)
         OBJECT.kdis.append((int(recTuple[0])))
 ENDEMBED;
 
 knn_rec2:= RECORD
     INTEGER SI;
-    //REAL4 KDIS;
+    REAL4 KDIS;
 END;
 
 STREAMED DATASET(knn_rec2) kdistance(STREAMED DATASET(knn_rec) recs,UNSIGNED handle ) :=
@@ -99,35 +101,53 @@ OUTPUT(handles, NAMED('handles'));
 handle:=MIN(handles,handle);
 OUTPUT(handle, NAMED('handle'));
 
-MyDS2:=DISTRIBUTE(firstDS);////////////////////////////////////////IMPORTANT 
+MyDS2:=DISTRIBUTE(firstDS);                            ////////////////////////////////////////IMPORTANT 
 OUTPUT(MyDS2, NAMED('MyDS2'));
 INTEGER K:=5;
-MyDS3 := knn(firstDS, handle, K);
+MyDS3 := knn(MyDS2, handle, K);
 OUTPUT(MyDS3, NAMED('MyDS3'));
 
+// knn_rec3:=RECORD
+//     knn_rec.SI;
+//     knn_rec.knn;
+//     knn_rec.dis;
+//     knn_rec.reach;
+//     knn_rec.LRD;
+// END;
 knn_rec3:=RECORD
-    knn_rec.SI;
-    knn_rec.knn;
-    knn_rec.dis;
-    knn_rec.reach;
-    knn_rec.LRD;
+   INTEGER4 SI1:=0;
+   REAL4 KDIS2:=0;
 END;
-
-knn_rec JoinThem(MyDS3 L, MyDS3 R) := TRANSFORM
-    SELF.SI:=L.SI;
-    SELF.knn:=L.knn;
-    SELF.dis:=L.dis;
-    SELF.reach:=R.dis;
-    SELF.LRD:=L.LRD;
-   
-    
+knn_rec3 JoinThem(MyDS3 L) := TRANSFORM
+   SELF.SI1:=l.SI;
+   SELF.KDIS2:=L.kdis;
+     
 END;
 
 //d1:=dataset(MyDS3, knn_rec);
 
-RT_folk := JOIN(MyDS3,
-                MyDS3,
-                LEFT.knn=RIGHT.SI,
-                JoinThem(LEFT, RIGHT));
-OUTPUT(RT_folk, NAMED('JOINED'));
+withKdis:= JOIN(MyDS3,
+                firstDS,
+                LEFT.KNN=RIGHT.SI and LEFT.KNNSI=0,
+                JoinThem(LEFT));
+OUTPUT(withKdis, NAMED('withKdis'));
+
+knn_rec4:=RECORD
+   INTEGER4 SI:=0;
+   INTEGER4 upper:=0;
+   REAL4 reach:=0;
+END;
+
+knn_rec JoinThem2(MyDS3 L) := TRANSFORM
+   SELF.SI:=L.KNN;
+   //SELF.upper:=L.SI;
+   SELF.KNNdis:= MAX(L.dis,withKdis[L.knn+1].KDIS2);
+   SELF:=l;
+
+END;
+
+reach:= PROJECT(MyDS3,JoinThem2(LEFT));
+OUTPUT(reach, NAMED('reach'));
+
+
 
