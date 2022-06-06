@@ -54,6 +54,7 @@ knn_rec:=RECORD
     REAL4 dis;
     REAL4 Kdis:=0;
     REAL KNNdis:=0;
+    REAL LDR;
    
 END;
 
@@ -67,7 +68,7 @@ STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle,
         dis, ind=OBJECT.tree.query([list(searchItem)], K)
         
         for x in range(0, len(dis[0])):
-            result=(int(recTuple[0]),int(x),int(ind[0][x]),float(dis[0][x]),float(dis[0][K-1]), float(0))
+            result=(int(recTuple[0]),int(x),int(ind[0][x]),float(dis[0][x]),float(dis[0][K-1]), float(0), float(0))
             yield (result)
         OBJECT.kdis.append((int(recTuple[0])))
 ENDEMBED;
@@ -101,7 +102,7 @@ OUTPUT(handles, NAMED('handles'));
 handle:=MIN(handles,handle);
 OUTPUT(handle, NAMED('handle'));
 
-MyDS2:=DISTRIBUTE(firstDS);                            ////////////////////////////////////////IMPORTANT 
+MyDS2:=DISTRIBUTE(firstDS, SI);                            ////////////////////////////////////////IMPORTANT 
 OUTPUT(MyDS2, NAMED('MyDS2'));
 INTEGER K:=5;
 MyDS3 := knn(MyDS2, handle, K);
@@ -148,6 +149,25 @@ END;
 
 reach:= PROJECT(MyDS3,JoinThem2(LEFT));
 OUTPUT(reach, NAMED('reach'));
+
+
+
+ dummy_rec DeNormThem(firstDS L, reach R) := TRANSFORM
+    SELF.SI := L.SI;
+    SELF.field11 := L.field11+ R.KNNdis;
+    SELF:=L;
+    
+END;
+
+DeNormedRecs := DENORMALIZE(firstDS,reach , 
+                            LEFT.SI = RIGHT.SI and RIGHT.dis!=0, 
+                            DeNormThem(LEFT, RIGHT));
+
+
+
+OUTPUT(DeNormedRecs, NAMED('DeNormedRecs'));
+
+
 
 
 
