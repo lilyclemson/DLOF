@@ -162,3 +162,14 @@ END;
 
 OUTPUT( RolledUpRecs , NAMED('RolledUpRecs'));
 
+dummy_rec DeNormThem(firstDS L, RolledUpRecs R) := TRANSFORM
+    SELF.field11:= (K-1)/R.ldr;
+    
+    SELF := L;
+END;
+
+DeNormedRecs := DENORMALIZE(firstDS, RolledUpRecs, 
+                            LEFT.SI = RIGHT.SI, 
+                            DeNormThem(LEFT, RIGHT));
+OUTPUT(DeNormedRecs , NAMED('DeNormedRecs'));
+
