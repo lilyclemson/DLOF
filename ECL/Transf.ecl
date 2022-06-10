@@ -55,6 +55,7 @@ knn_rec:=RECORD
     REAL4 Kdis:=0;
     REAL KNNdis:=0;
     REAL LDR;
+    REAL4 LOF:=0;
    
 END;
 
@@ -68,7 +69,7 @@ STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle,
         dis, ind=OBJECT.tree.query([list(searchItem)], K)
         
         for x in range(0, len(dis[0])):
-            result=(int(recTuple[0]),int(x),int(ind[0][x]),float(dis[0][x]),float(dis[0][K-1]), float(0), float(0))
+            result=(int(recTuple[0]),int(x),int(ind[0][x]),float(dis[0][x]),float(dis[0][K-1]), float(0), float(0),float(0))
             yield (result)
         OBJECT.kdis.append((int(recTuple[0])))
 ENDEMBED;
@@ -116,11 +117,13 @@ OUTPUT(MyDS3, NAMED('MyDS3'));
 //     knn_rec.LRD;
 // END;
 knn_rec3:=RECORD
-   INTEGER4 SI1:=0;
+   INTEGER4 SI:=0;
    REAL4 KDIS2:=0;
+   REAL4 LRD:=0;
+   REAL4 LOF:=0;
 END;
 knn_rec3 JoinThem(MyDS3 L) := TRANSFORM
-   SELF.SI1:=l.SI;
+   SELF.SI:=l.SI;
    SELF.KDIS2:=L.kdis;
      
 END;
@@ -162,14 +165,45 @@ END;
 
 OUTPUT( RolledUpRecs , NAMED('RolledUpRecs'));
 
-dummy_rec DeNormThem(firstDS L, RolledUpRecs R) := TRANSFORM
-    SELF.field11:= (K-1)/R.ldr;
-    
+knn_rec3 DeNormThem(withKdis L, RolledUpRecs R) := TRANSFORM
+    SELF.LRD:= (K-1)/R.ldr;
     SELF := L;
 END;
 
-DeNormedRecs := DENORMALIZE(firstDS, RolledUpRecs, 
+lrd_included := DENORMALIZE(withKdis, RolledUpRecs, 
                             LEFT.SI = RIGHT.SI, 
                             DeNormThem(LEFT, RIGHT));
-OUTPUT(DeNormedRecs , NAMED('DeNormedRecs'));
+OUTPUT(lrd_included , NAMED('DeNormedRecs'));
+
+
+
+knn_rec project_dis(reach l) :=TRANSFORM
+    SELF.LDR:= LRD_INCLUDED[l.knn+1].lrd;
+    self:= l;
+END;
+
+final:=project( reach, project_dis(LEFT));
+OUTPUT(final, NAMED('final'));
+
+knn_rec add_lof(final L, final R) := TRANSFORM
+    SELF.lof := IF(R.dis=0, 0, R.ldr +L.lof);
+    SELF := L; 
+END;
+//USING ROLLUP TO SUM THE REACHABILITY DISTANCE
+ LOF := ROLLUP( final, 
+                    LEFT.SI = RIGHT.SI, 
+                        add_lof(LEFT, RIGHT));
+
+OUTPUT( LOF , NAMED('LOF'));
+
+knn_rec3 FINAL_TOUCH(lrd_included L, RolledUpRecs R) := TRANSFORM
+    SELF.LOF:= R.LOF/(L.LRD* (K-1));
+    SELF := L;
+END;
+
+lOF_included := DENORMALIZE(lrd_included, LOF, 
+                            LEFT.SI = RIGHT.SI, 
+                            FINAL_TOUCH(LEFT, RIGHT));
+OUTPUT(lOF_included , NAMED('lOF_included'));
+
 
