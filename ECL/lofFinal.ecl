@@ -196,7 +196,7 @@ OUTPUT( LOF_included , NAMED('lOF_included'));
 
 //Sort to find the N most outlying points
 lofsort:=SORT( LOF_included, -LOF);
-OUTPUT(lofsort);
+OUTPUT(lofsort, NAMED('LOFsorted'));
 
 //Threshold is the boundary between user required Outliers and and Inliers
 REAL4 thresh:=lofsort[C].LOF;
