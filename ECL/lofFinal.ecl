@@ -9,6 +9,8 @@ dummy_rec:=RECORD
   INTEGER4 SI;
   anomalyLay;
 END;
+
+// Function to initialise KD tree locally on each node
 STREAMED DATASET(handleRec) fmInit(STREAMED DATASET(dummy_rec) recs) :=
            EMBED(Python: globalscope('facScope'), persist('query'), activity)
   
@@ -44,9 +46,7 @@ STREAMED DATASET(handleRec) fmInit(STREAMED DATASET(dummy_rec) recs) :=
     return[(1,)]
 ENDEMBED;
 
-// Here's a routine that uses the shared object from Init.
-// Notice that it must receive handle even though it's not used.
-// Otherwise, we can't guarantee that fmInit will be called first.
+// Record to store points its KNNs, its K distance, K distance of KNNs, LRD of its KNNs. 
 knn_rec:=RECORD
     INTEGER4 SI ;
     INTEGER4 KNNSI;
@@ -54,10 +54,12 @@ knn_rec:=RECORD
     REAL4 dis;
     REAL4 Kdis:=0;
     REAL KNNdis:=0;
-    REAL LDR;
+    REAL LRD;
     REAL4 LOF:=0;
    
 END;
+
+//Function to query the created KD tree on each node
 
 STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle, INTEGER K) :=
            EMBED(Python: globalscope('facScope'), persist('query'), activity)
@@ -74,48 +76,37 @@ STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle,
         OBJECT.kdis.append((int(recTuple[0])))
 ENDEMBED;
 
-knn_rec2:= RECORD
-    INTEGER SI;
-    REAL4 KDIS;
-END;
-
-STREAMED DATASET(knn_rec2) kdistance(STREAMED DATASET(knn_rec) recs,UNSIGNED handle ) :=
-           EMBED(Python: globalscope('facScope'), persist('query'), activity)
-    
-    
-    for x in range(0,len(OBJECT.kdis)):
-       yield(OBJECT.kdis[x][0])
-        
-
-ENDEMBED;
-
+// 0  based numbering for SI (Index)
 dummy_rec addSI(anomaly L, INTEGER C) := TRANSFORM
     SELF.SI:= C-1;
     SELF := L;
 END;
 
 firstDS:= PROJECT(anomaly, addSI(LEFT, COUNTER));
+
+//Build global tree on each node hence distribute same the whole dataset to each node
 MyDS := DISTRIBUTE(firstDS, ALL);
 OUTPUT(MyDS, NAMED('InputDataset'));
-
 handles:=fmInit(MyDS);
 OUTPUT(handles, NAMED('handles'));
 handle:=MIN(handles,handle);
 OUTPUT(handle, NAMED('handle'));
 
-MyDS2:=DISTRIBUTE(firstDS, SI);                            ////////////////////////////////////////IMPORTANT 
-OUTPUT(MyDS2, NAMED('MyDS2'));
+// Actual K is one less then k initialised here. KNN returns the point itself as neighbor 
+//  If user input = m then for this program input K=m+1
+//C is the contamination or user estimate of outliers in dataset
 INTEGER K:=5;
+INTEGER C:=150000;
+
+//Query the KD tree for each point, distribute the load across all nodes
+//Each node gets unique points, querying will give actual KNNs of those point
+MyDS2:=DISTRIBUTE(firstDS, SI);                             
+OUTPUT(MyDS2, NAMED('MyDS2'));
 MyDS3 := knn(MyDS2, handle, K);
 OUTPUT(MyDS3, NAMED('MyDS3'));
+OUTPUT(COUNT(MyDS2));
 
-// knn_rec3:=RECORD
-//     knn_rec.SI;
-//     knn_rec.knn;
-//     knn_rec.dis;
-//     knn_rec.reach;
-//     knn_rec.LRD;
-// END;
+
 knn_rec3:=RECORD
    INTEGER4 SI:=0;
    REAL4 KDIS2:=0;
@@ -124,61 +115,57 @@ knn_rec3:=RECORD
 END;
 knn_rec3 JoinThem(MyDS3 L) := TRANSFORM
    SELF.SI:=l.SI;
-   SELF.KDIS2:=L.kdis;
-     
+   SELF.KDIS2:=L.kdis;   
 END;
 
-//d1:=dataset(MyDS3, knn_rec);
-
+// To get K distance of all points and store in ascending order of Index(SI) 
 withKdis:= JOIN(MyDS3,
                 firstDS,
                 LEFT.KNN=RIGHT.SI and LEFT.KNNSI=0,
                 JoinThem(LEFT));
 OUTPUT(withKdis, NAMED('withKdis'));
 
-knn_rec4:=RECORD
-   INTEGER4 SI:=0;
-   INTEGER4 upper:=0;
-   REAL4 reach:=0;
-END;
+
+//Transform to get the K distance of KNNs of p
 
 knn_rec JoinThem2(MyDS3 L) := TRANSFORM
    SELF.SI:=L.si;
-   //SELF.upper:=L.SI;
    SELF.KNNdis:= MAX(L.dis,withKdis[L.knn+1].KDIS2);
    SELF:=l;
 
 END;
-
+// Here we store reachability ditance of p wrt to all its KNNs
 reach:= PROJECT(MyDS3,JoinThem2(LEFT));
 OUTPUT(reach, NAMED('reach'));
 
-
+//USING ROLLUP TO SUM THE REACHABILITY DISTANCE of p wrt all its KNNs
 knn_rec RollThem(reach L, reach R) := TRANSFORM
-    SELF.ldr := IF(R.dis=0, 0, R.knndis +L.ldr);
+    SELF.lrd := IF(R.dis=0, 0, R.knndis +L.lrd);
     SELF := L; 
 END;
-//USING ROLLUP TO SUM THE REACHABILITY DISTANCE
- RolledUpRecs := ROLLUP( reach, 
+
+
+ withRD := ROLLUP( reach, 
                         LEFT.SI = RIGHT.SI, 
                         RollThem(LEFT, RIGHT));
 
-OUTPUT( RolledUpRecs , NAMED('RolledUpRecs'));
+OUTPUT( withRD , NAMED('withRD'));
 
-knn_rec3 DeNormThem(withKdis L, RolledUpRecs R) := TRANSFORM
-    SELF.LRD:= (K-1)/R.ldr;
+// Finding LRD of each point by dividing K with sum of reach distance wrt KNNs
+knn_rec3 DeNormThem(withKdis L, withRD R) := TRANSFORM
+    SELF.LRD:= (K-1)/R.lrd;
     SELF := L;
 END;
-
-lrd_included := DENORMALIZE(withKdis, RolledUpRecs, 
+// lrd_included contains LRD of all points in sorted order of Index(SI)
+lrd_included := DENORMALIZE(withKdis, withRD, 
                             LEFT.SI = RIGHT.SI, 
                             DeNormThem(LEFT, RIGHT));
-OUTPUT(lrd_included , NAMED('DeNormedRecs'));
+OUTPUT(lrd_included , NAMED('LRDincluded'));
 
 
-
+// Access the lrd in the lrd_included and store beside each KNN of p
 knn_rec project_dis(reach l) :=TRANSFORM
-    SELF.LDR:= LRD_INCLUDED[l.knn+1].lrd;
+    SELF.Lrd:= LRD_INCLUDED[l.knn+1].lrd;
     self:= l;
 END;
 
@@ -186,24 +173,48 @@ final:=project( reach, project_dis(LEFT));
 OUTPUT(final, NAMED('final'));
 
 knn_rec add_lof(final L, final R) := TRANSFORM
-    SELF.lof := IF(R.dis=0, 0, R.ldr +L.lof);
+    SELF.lof := IF(R.dis=0, 0, R.lrd +L.lof);
     SELF := L; 
 END;
-//USING ROLLUP TO SUM THE REACHABILITY DISTANCE
+//Using Rollup to find sum of LRD of all KNNs of every point in dataset
  LOF := ROLLUP( final, 
                     LEFT.SI = RIGHT.SI, 
-                        add_lof(LEFT, RIGHT));
+                        add_lof(LEFT, RIGHT), PARALLEL);
 
 OUTPUT( LOF , NAMED('LOF'));
 
-knn_rec3 FINAL_TOUCH(lrd_included L, RolledUpRecs R) := TRANSFORM
+// Fill LOF of every 
+knn_rec3 fill_lof(lrd_included L, LOF R) := TRANSFORM
     SELF.LOF:= R.LOF/(L.LRD* (K-1));
     SELF := L;
 END;
-
-lOF_included := DENORMALIZE(lrd_included, LOF, 
+// Enter LOF of every point in sorted order of SI (Index)
+ LOF_included:= DENORMALIZE(lrd_included, LOF, 
                             LEFT.SI = RIGHT.SI, 
-                            FINAL_TOUCH(LEFT, RIGHT));
-OUTPUT(lOF_included , NAMED('lOF_included'));
+                            fill_lof(LEFT, RIGHT));
+OUTPUT( LOF_included , NAMED('lOF_included'));
 
+//Sort to find the N most outlying points
+lofsort:=SORT( LOF_included, -LOF);
+OUTPUT(lofsort);
 
+//Threshold is the boundary between user required Outliers and and Inliers
+REAL4 thresh:=lofsort[C].LOF;
+
+testRec:=RECORD
+INTEGER4 SI;
+REAL4 LOFval;  
+BOOLEAN boolLOF;
+END;
+
+// Check LOF of every value with threshhold
+// if LOF> Threshold, outlier else inlier
+testRec fillLOF(LOF_included L):=TRANSFORM
+
+   SELF.boolLOF:=if(L.LOF>=thresh, true, false);
+   SELF.LOFval:=L.LOF;
+   SELF.SI:=L.SI;
+END;
+//Result with LOF value and boolean LOF value
+FitPredict:= PROJECT(LOF_included, fillLOF(LEFT));
+OUTPUT(FitPredict,NAMED('FitPredict'));
