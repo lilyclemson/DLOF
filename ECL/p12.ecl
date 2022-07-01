@@ -1,7 +1,4 @@
 IMPORT Python3 AS Python;
-IMPORT Std.System.Thorlib;
-
-
 anomalyLay:=RECORD
   INTEGER a;
   INTEGER b;
@@ -20,7 +17,6 @@ anomaly:= DATASET([{126,173},
 {342,166}
 ], anomalyLay);
 
-
 handleRec := RECORD
   UNSIGNED handle;
 END;
@@ -38,7 +34,6 @@ STREAMED DATASET(handleRec) fmInit(STREAMED DATASET(dummy_rec) recs) :=
     
     import numpy 
     from sklearn.neighbors import KDTree
-    import tensorflow
 
     if 'OBJECT' not in globals():
         # This is your one-time initializer code.  It will only be executed once on each node.
@@ -46,16 +41,15 @@ STREAMED DATASET(handleRec) fmInit(STREAMED DATASET(dummy_rec) recs) :=
        #UNPACK
         class kdCreate:
             def __init__(self,points):
-                self.points=points
-                l=[]
-                for x in range(0, len(points)):
-                    l.append(points[x][1:])
-                self.tree=KDTree(l)
+                self.kdis=[]
+                self.tree=KDTree(points)
+            def storeKdis(self, ind, dis):
+                self.kdis.append((ind,dis))
                 
         
         points=[] 
         for recTuple in recs:
-            interList=list(recTuple[:])
+            interList=list(recTuple[1:])
             interList= list(map(float,interList))
             points.append(interList)
 
@@ -75,12 +69,14 @@ knn_rec:=RECORD
     REAL4 dis;
     REAL4 Kdis:=0;
     REAL KNNdis:=0;
+    REAL LRD;
+    REAL4 LOF:=0;
    
 END;
 
 //Function to query the created KD tree on each node
 
-STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle, INTEGER K, INTEGER N) :=
+STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle, INTEGER K) :=
            EMBED(Python: globalscope('facScope'), persist('query'), activity)
     
     
@@ -90,8 +86,9 @@ STREAMED DATASET(knn_rec) knn(STREAMED DATASET(dummy_rec) recs, UNSIGNED handle,
         dis, ind=OBJECT.tree.query([list(searchItem)], K)
         
         for x in range(0, len(dis[0])):
-            result=(int(recTuple[0]),int(x), int(OBJECT.points[ind[0][x]][0]) ,float(dis[0][x]),float(dis[0][K-1]), float(N))
+            result=(int(recTuple[0]),int(x),int(ind[0][x]),float(dis[0][x]),float(dis[0][K-1]), float(0), float(0),float(0))
             yield (result)
+        OBJECT.kdis.append((int(recTuple[0])))
 ENDEMBED;
 
 // 0  based numbering for SI (Index)
@@ -101,58 +98,50 @@ dummy_rec addSI(anomaly L, INTEGER C) := TRANSFORM
 END;
 
 firstDS:= PROJECT(anomaly, addSI(LEFT, COUNTER));
-OUTPUT(firstDS);
+
+//Build global tree on each node hence distribute same the whole dataset to each node
 MyDS := DISTRIBUTE(firstDS, ALL);
-OUTPUT(count(MyDS), NAMED('myDs'));
+OUTPUT(MyDS, NAMED('InputDataset'));
 handles:=fmInit(MyDS);
-
+OUTPUT(handles, NAMED('handles'));
 handle:=MIN(handles,handle);
-// OUTPUT(handle, NAMED('handle'));
+OUTPUT(handle, NAMED('handle'));
 
+// Actual K is one less then k initialised here. KNN returns the point itself as neighbor 
+//  If user input = m then for this program input K=m+1
+//C is the contamination or user estimate of outliers in dataset
 INTEGER K:=3;
-INTEGER C:=500;
+INTEGER C:=150000;
 
 //Query the KD tree for each point, distribute the load across all nodes
 //Each node gets unique points, querying will give actual KNNs of those point
 MyDS2:=DISTRIBUTE(firstDS, SI);                             
-// OUTPUT(MyDS2, NAMED('MyDS2'));
-MyDS3 := knn(MyDS2, handle, K,Thorlib.node() );
-OUTPUT(SORT(MyDS3, SI), NAMED('MyDS3'));
+OUTPUT(MyDS2, NAMED('MyDS2'));
+MyDS3 := knn(MyDS2, handle, K);
+OUTPUT(MyDS3, NAMED('MyDS3'));
 
 MyDS4:=SORT(MyDS3(dis=0), SI);
+OUTPUT(MyDs4, NAMED('MyDS4'));
 
  knn_rec3:=RECORD
     INTEGER4 SI:=0;
     INTEGER4 KNN:=0;
     REAL4 dis:=0;
-    REAL4 KNNdis:=0;
+    REAL4 knnKdis:=0;
  END;
-knn_rec3 JoinThem2(MyDS3 L) := TRANSFORM
-   SELF.SI:=L.si;
-   SELF.KNN:=L.knn;
+
+knn_rec3 JoinThem(MyDS3 L, MyDS4 R) := TRANSFORM
+   SELF.SI:=L.SI;
+   SELF.KNN:=L.KNN;
    SELF.dis:=L.dis;
-   SELF.KNNdis:= MyDS4[L.knn].kdis;
-  
+   SELF.KnnKdis:=R.kdis;   
 END;
-reach:= PROJECT(MyDS3,JoinThem2(LEFT));
-// OUTPUT(MyDS4(SI=2868), NAMED('REACH'));
 
-// knn_rec3:=RECORD
-//    INTEGER4 SI:=0;
-//    INTEGER4 KNN:=0;
-//    REAL4 dis:=0;
-//    REAL4 KNNdis:=0;
-// END;
-// knn_rec3 JoinThem(MyDS3 L, MyDS4 R) := TRANSFORM
-//    SELF.SI:=L.SI;
-//    SELF.KNN:=L.KNN;
-//    SELF.dis:=L.dis;
-//    SELF.KNNdis:=R.kdis;   
-// END;
+withKdis:= JOIN(MyDS3,
+                MyDS4,
+                LEFT.KNN=RIGHT.SI,
+                JoinThem(LEFT, RIGHT));
+OUTPUT(SORT(withKdis, si), NAMED('withKdis'));
 
- 
-// withKdis:= JOIN(MyDS3,
-//                 MyDS4,
-//                 LEFT.KNN=RIGHT.SI,
-//                 JoinThem(LEFT, RIGHT));
-// OUTPUT(withKdis, NAMED('withKdis'));
+reachD := TABLE(withKdis, {si, reachDist := K/SUM(GROUP, knnKdis)}, si);
+OUTPUT(reachD, NAMED('reachD'));
