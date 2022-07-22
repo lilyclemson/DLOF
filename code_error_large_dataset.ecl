@@ -216,7 +216,7 @@ LOF_final:= JOIN(sort_LOF,
 OUTPUT(LOF_final, named('LOF_final'));
 //LOF value of each point 
 // Lof_display:=LOF_final(lof_val>1.5);             
-// OUTPUT(COUNT(Lof_display));
+ OUTPUT(COUNT(Lof_display));
 lofTOPN:=TOPN(LOF_final,C,-LOF_val);
 //OUTPUT(lofTOPN);
 //Threshold is the boundary between user required Outliers and and Inliers
@@ -255,74 +255,7 @@ test_model:=RECORD
     REAL SK_LOF
 END;
 
-// STREAMED DATASET(test_model) skl_lof(STREAMED DATASET(knn_rec6) recs, UNSIGNED handle, REAL con, INTEGER K) :=
-//            EMBED(Python: globalscope('facScope'), persist('query'), activity)
-    
-//     from sklearn.neighbors import LocalOutlierFactor
-//     import math 
-//     l=[]
-//     for x in range(0, len(OBJECT.points)):
-//         l.append(OBJECT.points[x][1:])
-//     clf = LocalOutlierFactor(n_neighbors=K-1,contamination=float(con))
-//     out= clf.fit_predict(l)
-//     lof_val_sk=clf.negative_outlier_factor_
-    
-//     pos_error=0
-//     neg_error=0
-//     proper=0
-    
-//     '''
-//     for recTuple in recs:
-//         index=int(OBJECT.points[int(recTuple[0])][0])
-    
-//         if(recTuple[2]==bool(0)):
-            
-//             if(out[index]==-1):
-//                 neg_error+=1
-//                 yield(int(recTuple[0]),int(index),float(-1*recTuple[1]), float(lof_val_sk[index]),float(abs(float(recTuple[1])+float(lof_val_sk[index]))), bool(1))
-//             else:
-//                 proper+=1
-//                 yield(int(recTuple[0]),int(index),float(-1*recTuple[1]), float(lof_val_sk[index]),float(abs(float(recTuple[1])+float(lof_val_sk[index]))), bool(0))
-//         else:
-//             if(out[index]==1):
-//                 pos_error+=1
-//                 yield(int(recTuple[0]),int(index),float(-1*recTuple[1]), float(lof_val_sk[index]),float(abs(float(recTuple[1])+float(lof_val_sk[index]))),bool(1))
-//             else:
-//                 proper+=1
-//                 yield(int(recTuple[0]),int(index),float(-1*recTuple[1]), float(lof_val_sk[index]),float(abs(float(recTuple[1])+float(lof_val_sk[index]))), bool(0))
 
-//     '''
-//     '''
-//     for recTuple in recs:
-//         index=int(OBJECT.points[int(recTuple[0])][0])
-//         yield(int(recTuple[0]),int(index),float(-1*recTuple[1]), float(lof_val_sk[index]),float(abs(float(recTuple[1])+float(lof_val_sk[index]))), math.isclose(-1*float(recTuple[1]), lof_val_sk[index], abs_tol = 1e-05))
-//     '''  
-
-//     for x in range(0, len(lof_val_sk)):
-//         yield((int(x),float(lof_val_sk[x])));
-// ENDEMBED;
-
-
-// test_mode2:=RECORD
-//     INTEGER SI;
-//     REAL4 LOF;
-//     INTEGER I;
-// END;
-// STREAMED DATASET(test_mode2) skl_lof(STREAMED DATASET(knn_rec6) recs, UNSIGNED handle, REAL con) :=
-//            EMBED(Python: globalscope('facScope'), persist('query'), activity)
-    
-//     from sklearn.neighbors import LocalOutlierFactor
-//     l=[]
-//     for x in range(0, len(OBJECT.points)):
-//         l.append(OBJECT.points[x][1:])
-//     clf = LocalOutlierFactor(n_neighbors=5,contamination=float(con))
-//     out= clf.fit_predict(l)
-//     lof_val_sk=clf.negative_outlier_factor_
-    
-    
-//     for recTuple in range(0, len(lof_val_sk)):
-//         yield(int(recTuple),float(lof_val_sk[recTuple]),int(out[recTuple]))
-// ENDEMBED;
 
 STREAMED DATASET(test_model) skl_lof(STREAMED DATASET(anomalyLay) recs, REAL con, INTEGER K) :=
             EMBED(Python)
