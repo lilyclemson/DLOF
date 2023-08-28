@@ -1,4 +1,4 @@
-# Local Outlier Factor (LOF) Algorithm
+# Distributed Local Outlier Factor (LOF) Algorithm
 
 The Local Outlier Factor (LOF) algorithm is used to detect anomalies or outliers in a dataset based on the density relationships of data points in their neighborhoods. It quantifies the local deviation of a data point with respect to its neighbors. The algorithm can be implemented in a distributed setting using the HPCC Systems platform.
 
